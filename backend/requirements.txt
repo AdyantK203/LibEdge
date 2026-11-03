@@ -1,0 +1,5 @@
+fastapi==0.115.*
+uvicorn[standard]==0.30.*
+pydantic==2.*
+bless==0.2.6   # BLE GATT server (BlueZ on Linux/Jetson); only needed when BLE=1
+pymongo>=4.9,<5
