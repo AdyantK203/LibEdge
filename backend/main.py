@@ -1,5 +1,4 @@
-"""LibEdge backend. Receives anonymous seat states from edge nodes, runs the context engine,
-serves the admin dashboard and (optionally) answers students over Bluetooth LE."""
+"""Library seating API: anonymous occupancy, recommendations, and dashboard updates."""
 import asyncio, math, os, time, logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
@@ -17,8 +16,8 @@ NODE_LAST_SEEN = {}
 NODE_MODE = {floor: "edge" for floor in {seat.floor for seat in BY_ID.values()}}
 log = logging.getLogger("libedge")
 
-def answer(n: int) -> dict:
-    return engine.compact(engine.recommend(STATE, NOISE, n), STATE)
+def answer(n: int, prefer_quiet: bool = False) -> dict:
+    return engine.compact(engine.recommend(STATE, NOISE, n, prefer_quiet), STATE)
 
 @asynccontextmanager
 async def lifespan(app):
@@ -48,8 +47,6 @@ async def lifespan(app):
         tasks.append(asyncio.create_task(mongo_sync.run(
             collection, STATE, NOISE, NODE_LAST_SEEN, NODE_MODE, interval
         )))
-    if os.getenv("BLE") == "1":
-        import ble_gateway; tasks.append(asyncio.create_task(ble_gateway.run(answer)))
     yield
     for t in tasks: t.cancel()
     if tasks:
@@ -101,8 +98,9 @@ def current_state():
 @app.get("/api/state")
 def state(): return current_state()
 
-@app.get("/api/recommend")          # dev/demo path; students normally use Bluetooth
-def recommend(group: int = 2): return answer(max(1, min(12, group)))
+@app.get("/api/recommend")
+def recommend(group: int = 2, quiet: bool = False):
+    return answer(max(1, min(12, group)), quiet)
 
 @app.websocket("/ws")
 async def ws(sock: WebSocket):

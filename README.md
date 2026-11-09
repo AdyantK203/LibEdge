@@ -1,14 +1,13 @@
 # LibEdge — context-aware library seating
 
-LibEdge keeps camera frames on the floor's edge computer. It sends anonymous seat states to a backend over the library network. The student phone connects to the library gateway over Bluetooth Low Energy (BLE); it does not call the backend over Wi-Fi or mobile data.
+LibEdge shows library seat availability in a browser. Students search for adjacent seats over HTTP; the staff dashboard receives seat updates over WebSocket. Both use the same backend. Bluetooth is no longer required.
 
-```
-Camera ─► Jetson (edge/seat_monitor.py; frames stay local)
-              │ anonymous seat states over library LAN
-              ▼
-        FastAPI backend ── context engine ── admin dashboard (#admin)
-              │
-              └─ BLE gateway (GATT) ◄── Bluetooth LE ──► student phone
+```text
+YOLO / camera node -> MongoDB snapshots or authenticated edge updates
+                              |
+                        FastAPI backend
+                              |
+               Student website + staff dashboard
 ```
 
 ## Demo without hardware
@@ -29,19 +28,35 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173/?demo` for the student flow or `http://localhost:5173/#admin` for the live dashboard. The demo simulates occupancy; it does not start Bluetooth or read cameras.
+Open `http://localhost:5173/` for the student flow or `http://localhost:5173/#admin` for the live dashboard. Without a MongoDB URI, the backend simulates occupancy. It does not read cameras.
 
-## Real Bluetooth student connection
+## Connect from a phone
 
-Run the BLE gateway on a Linux device with BlueZ and a Bluetooth adapter. The phone must be close enough to connect to the advertised `LibEdge` GATT service. The web app must be served from a secure HTTPS origin for Web Bluetooth; `localhost` is allowed for development. Hosting the page may use the library network, but recommendation requests and responses between phone and library use BLE.
+For local development, put the phone and computer on the same Wi-Fi network. Run `npm run dev` in `frontend` (the script binds Vite to the network), then open the Network URL printed by Vite on the phone, for example `http://192.168.1.20:5173/`. Keep the backend running on `127.0.0.1:8000`; Vite forwards `/api` and `/ws` requests to it. Allow the frontend port on your private network if Windows Firewall prompts. `localhost` on a phone refers to the phone, not the computer.
 
-```bash
+For access over mobile data or outside the library, deploy the built frontend and backend behind an HTTPS host that proxies `/api` and `/ws`. The development server is for local use. Admin authentication is still required before a public deployment; the Staff view link is navigation, not an access control.
+
+## Windows quick start
+
+From the project root, in the terminal containing your MongoDB environment variables:
+
+```powershell
+$env:MONGODB_DATABASE = "libedge"
+$env:MONGODB_COLLECTION = "libedge_sample_state"
+# Use the same private key as the edge writer if you use direct edge updates.
+$env:NODE_KEY = [guid]::NewGuid().ToString("N")
 cd backend
-pip install -r requirements.txt
-BLE=1 SIMULATE=0 NODE_KEY='replace-with-a-private-key' uvicorn main:app --host 0.0.0.0
+..\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-Use Chrome on Android. iOS Safari does not support Web Bluetooth; use a compatible browser such as Bluefy or build a native app. `frontend/src/ble.js` contains the GATT UUIDs used by both sides. The desktop demo link is only for local development.
+In a second terminal, from the project root:
+
+```powershell
+cd frontend
+& "C:\Program Files\nodejs\npm.cmd" run dev
+```
+
+Restart the backend after Python changes. The frontend normally reloads automatically. To refresh sample snapshots, stop the backend in its terminal, run `..\.venv\Scripts\python.exe .\seed_sample_data.py`, and start the backend again. Seeding writes 60 historical snapshots across six zones; it does not generate a continuous live feed.
 
 ## Edge camera node
 
@@ -83,7 +98,7 @@ MONGODB_POLL_SECONDS=2
 NODE_KEY=<private edge-update key>
 ```
 
-When `MONGODB_URI` is set, MongoDB is used instead of simulated occupancy. The backend keeps a short-lived in-memory copy for the existing recommendation engine, WebSocket dashboard, and BLE responses. The phone still communicates with the library over BLE.
+When `MONGODB_URI` is set, MongoDB is used instead of simulated occupancy. The backend keeps a short-lived in-memory copy for the existing recommendation engine and WebSocket dashboard. Phones request recommendations from the web API.
 
 On Windows PowerShell, set those variables in the same terminal that starts the backend, then run:
 
@@ -109,4 +124,6 @@ The YOLO writer must update each floor's snapshot document with a fresh `updated
 
 ## Current scope
 
-Implemented: simulated floors, seat adjacency and ranking, student recommendations, optional BLE transport, edge camera inference and reporting, and a WebSocket admin dashboard. Zone noise currently uses configured baseline values. Noise sensors, forecasting, seat holds, HVAC control, multi-library sync, and student preference filters are not implemented.
+Implemented: simulated floors, MongoDB snapshot polling, seat adjacency and ranking, quiet preference, student web recommendations, light/dark themes, per-seat staff maps, and a WebSocket dashboard. The edge script can run inference and post seat states; the trained model and camera polygons must be supplied and validated for the real library.
+
+Remaining: admin authentication before public hosting, real camera/model validation, actual noise sensors, and live video integration. Zone noise and walking times currently use configured values; landmark descriptions are examples. Seat maps show table layouts, not architectural floor plans. Seats are not reserved. Historical MongoDB snapshots become stale unless the writer refreshes them.

@@ -35,7 +35,8 @@ def apply_documents(collection, state, noise, node_last_seen, node_mode):
     applied_floors = set()
     floor_times = {}
     zone_times = {}
-    for doc in collection.find({"floor": {"$in": FLOORS}}):
+    # Apply older snapshots first so newer documents overwrite their seat states.
+    for doc in collection.find({"floor": {"$in": FLOORS}}).sort("updated_at", 1):
         floor = doc.get("floor")
         zone = doc.get("zone")
         if (floor not in FLOORS or
