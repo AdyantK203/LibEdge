@@ -1,79 +1,90 @@
-# LibEdge — context-aware library seating
+# LibEdge
 
-LibEdge shows library seat availability in a browser. Students search for adjacent seats over HTTP; the staff dashboard receives seat updates over WebSocket. Both use the same backend. Bluetooth is no longer required.
+LibEdge is a context-aware library seating system. It turns anonymous seat-state snapshots into live availability, group-seat recommendations, staff floor views, and directions to the recommended table.
+
+Bluetooth is not used. The student and staff interfaces communicate with the backend over HTTP and WebSocket connections.
 
 ```text
-YOLO / camera node -> MongoDB snapshots or authenticated edge updates
-                              |
-                        FastAPI backend
-                              |
-               Student website + staff dashboard
+Camera/video -> YOLO seat analysis -> MongoDB floor-zone snapshots
+                                      |
+                                LibEdge backend :8000
+                                      |
+             Student website + staff dashboard + camera manager
 ```
 
-## Demo without hardware
+## Included features
 
-Run the backend:
+- Student seat search for a group size, with an optional quieter-place preference.
+- Live availability, occupancy, noise, adjacent-seat count, and alternative zone recommendations.
+- Light/dark themes plus desktop and phone-preview layouts.
+- Interactive table tiles for every recommendation and a **Locate seats** route map for all three floors.
+- Staff dashboard with per-floor, per-zone tile maps and live WebSocket updates.
+- Integrated camera manager for adding a camera/video source, previewing detection, and publishing reviewed seat states.
+- MongoDB polling for occupancy snapshots; sample data can be seeded for a full UI test.
 
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn main:app --reload
+## Project layout
+
+```text
+backend/                  FastAPI seating API, MongoDB sync, recommendation engine
+backend/camera_manager/   Integrated camera manager, YOLO code, local model weights
+frontend/                 React/Vite student, staff, map, and camera-manager UI
+edge/                     Optional separate edge-node writer for Jetson/LAN deployments
 ```
 
-In another terminal, run the student app:
+The YOLO camera manager and its model weights are inside this repository. You do not need to start the separate `Downloads\YOLO` project.
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+## One-time Windows setup
 
-Open `http://localhost:5173/` for the student flow or `http://localhost:5173/#admin` for the live dashboard. Without a MongoDB URI, the backend simulates occupancy. It does not read cameras.
-
-## Connect from a phone
-
-For local development, put the phone and computer on the same Wi-Fi network. Run `npm run dev` in `frontend` (the script binds Vite to the network), then open the Network URL printed by Vite on the phone, for example `http://192.168.1.20:5173/`. Keep the backend running on `127.0.0.1:8000`; Vite forwards `/api` and `/ws` requests to it. Allow the frontend port on your private network if Windows Firewall prompts. `localhost` on a phone refers to the phone, not the computer.
-
-For access over mobile data or outside the library, deploy the built frontend and backend behind an HTTPS host that proxies `/api` and `/ws`. The development server is for local use. Admin authentication is still required before a public deployment; the Staff view link is navigation, not an access control.
-
-## Windows quick start
-
-From the project root, in the terminal containing your MongoDB environment variables:
+From the repository root:
 
 ```powershell
+.\.venv\Scripts\python.exe -m pip install -r .\backend\requirements.txt
+```
+
+Install frontend packages once:
+
+```powershell
+cd .\frontend
+& "C:\Program Files\nodejs\npm.cmd" install
+```
+
+## Start LibEdge
+
+Set `MONGODB_URI` securely in the same PowerShell session before starting the backend. Do not put database passwords in code or commit them to Git.
+
+For the normal MongoDB-backed app:
+
+```powershell
+cd C:\Users\karad\Downloads\libedge\libedge
 $env:MONGODB_DATABASE = "libedge"
-$env:MONGODB_COLLECTION = "libedge_sample_state"
-# Use the same private key as the edge writer if you use direct edge updates.
-$env:NODE_KEY = [guid]::NewGuid().ToString("N")
-cd backend
-..\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
+$env:MONGODB_COLLECTION = "floor_state"
+$env:NODE_KEY = "choose-a-private-local-key"
+.\.venv\Scripts\python.exe -m uvicorn main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
-In a second terminal, from the project root:
+For a no-database UI demo, leave `MONGODB_URI` unset and use the same command. The backend starts with simulated occupancy.
+
+Start the frontend in another terminal:
 
 ```powershell
-cd frontend
-& "C:\Program Files\nodejs\npm.cmd" run dev
+cd C:\Users\karad\Downloads\libedge\libedge\frontend
+& "C:\Program Files\nodejs\node.exe" .\node_modules\vite\bin\vite.js --host 127.0.0.1 --port 5173
 ```
 
-Restart the backend after Python changes. The frontend normally reloads automatically. To refresh sample snapshots, stop the backend in its terminal, run `..\.venv\Scripts\python.exe .\seed_sample_data.py`, and start the backend again. Seeding writes 60 historical snapshots across six zones; it does not generate a continuous live feed.
+Open:
 
-## Edge camera node
+| Interface | URL |
+| --- | --- |
+| Student seating | `http://127.0.0.1:5173/` |
+| Staff dashboard | `http://127.0.0.1:5173/#admin` |
+| Camera manager | `http://127.0.0.1:5173/#cameras` |
+| Backend state API | `http://127.0.0.1:8000/api/state` |
 
-Install the edge dependencies on each Jetson, then provide a seat polygon file for that camera view. Every seat ID must exist in `backend/layout.py`; coordinates are pixels in the camera frame.
+The Vite development server forwards `/api`, `/ws`, and `/camera-manager` to the single backend on port 8000. There is no separate camera-manager port.
 
-```bash
-cd edge
-pip install -r requirements.txt
-python seat_monitor.py --source rtsp://CAM/stream --seats seats_f2.json \
-  --backend http://BACKEND-LAN-IP:8000 --key 'replace-with-a-private-key'
-```
+## MongoDB snapshot contract
 
-`--source` can also be a prerecorded video file, which loops for demos. The edge node posts occupancy updates over the library LAN using `X-Node-Key`; set its `--key` to the backend's `NODE_KEY`. The admin dashboard reports whether each floor node is reporting or stale. Only configured seat states and optional zone noise values are accepted.
-
-## Read occupancy snapshots from MongoDB
-
-The backend can poll a MongoDB collection and use the latest document for each floor-zone pair. Store one up-to-date document per zone in the `floor_state` collection, with seat IDs matching `backend/layout.py`:
+The backend reads the latest snapshot for each floor-zone pair from the collection named by `MONGODB_COLLECTION`. A YOLO pipeline or the integrated camera manager writes the same format.
 
 ```json
 {
@@ -81,49 +92,64 @@ The backend can poll a MongoDB collection and use the latest document for each f
   "floor": 2,
   "zone": "B",
   "updated_at": "2026-11-03T12:00:00Z",
-  "seats": {"2-B000": "empty", "2-B001": "occupied", "2-B002": "object"},
-  "noise": {"2-B": 33}
+  "seats": {
+    "2-B000": "empty",
+    "2-B001": "occupied",
+    "2-B002": "object"
+  },
+  "noise": { "2-B": 33 }
 }
 ```
 
-Update that floor-zone document (upsert by its unique `_id`) whenever the YOLO pipeline produces a new snapshot. A snapshot without `zone` can represent a whole floor. Configure the backend using environment variables; do not put credentials in source files:
+Seat IDs use `floor-zone-table-row-column`. For example, `2-B000` means floor 2, Zone B, table 0, row 0, column 0. Each table has two rows and four seats per row. Valid layout IDs are defined in `backend/layout.py`.
 
-Seat IDs must use the existing `floor-zone-table-row-column` digits after the zone initial. For example, `2-B000` is floor 2, zone B, table 0, row 0, column 0; `2-B003` is the fourth seat on that table's first row, and `2-B010` is the first seat on its second row. Number tables from left to right, and number columns from left to right within each row. The current layout defines 4 seats per row and 2 rows per table.
+Useful environment variables:
 
 ```text
 MONGODB_URI=<Atlas or local MongoDB URI>
 MONGODB_DATABASE=libedge
 MONGODB_COLLECTION=floor_state
 MONGODB_POLL_SECONDS=2
-NODE_KEY=<private edge-update key>
+NODE_KEY=<private value used by authenticated edge writers>
+CAMERA_MANAGER_ENABLED=1
 ```
 
-When `MONGODB_URI` is set, MongoDB is used instead of simulated occupancy. The backend keeps a short-lived in-memory copy for the existing recommendation engine and WebSocket dashboard. Phones request recommendations from the web API.
+The collection name must be identical for the backend and camera manager. If you use `libedge_yolo_detections` or `libedge_sample_state` instead of `floor_state`, set `MONGODB_COLLECTION` to that same value before starting the backend.
 
-On Windows PowerShell, set those variables in the same terminal that starts the backend, then run:
+## Seed realistic sample data
+
+With `MONGODB_URI` set and the backend stopped, run:
 
 ```powershell
-$baseUri = Read-Host "Paste Atlas URI, leaving <db_password> unchanged"
-$securePassword = Read-Host "Enter database-user password" -AsSecureString
-$ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
-try {
-    $password = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
-    $env:MONGODB_URI = $baseUri.Replace("<db_password>", [uri]::EscapeDataString($password))
-} finally {
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
-    Remove-Variable password, securePassword, baseUri, ptr -ErrorAction SilentlyContinue
-}
+cd C:\Users\karad\Downloads\libedge\libedge
 $env:MONGODB_DATABASE = "libedge"
-$env:MONGODB_COLLECTION = "floor_state"
-$env:NODE_KEY = "<a private edge-update key>"
-cd backend
-..\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
+$env:MONGODB_COLLECTION = "libedge_sample_state"
+.\.venv\Scripts\python.exe .\backend\seed_sample_data.py
 ```
 
-The YOLO writer must update each floor's snapshot document with a fresh `updated_at` and a `seats` object. If its current MongoDB document shape differs from the example above, map it into this snapshot format before syncing.
+Then start the backend with `MONGODB_COLLECTION` still set to `libedge_sample_state`. The script writes six floor-zone snapshots and does not change unrelated documents.
 
-## Current scope
+## Camera manager
 
-Implemented: simulated floors, MongoDB snapshot polling, seat adjacency and ranking, quiet preference, student web recommendations, light/dark themes, per-seat staff maps, and a WebSocket dashboard. The edge script can run inference and post seat states; the trained model and camera polygons must be supplied and validated for the real library.
+Open the staff dashboard and choose **Manage cameras**, or visit `/#cameras`. Camera management is served by the same FastAPI backend at `/camera-manager/`.
 
-Remaining: admin authentication before public hosting, real camera/model validation, actual noise sensors, and live video integration. Zone noise and walking times currently use configured values; landmark descriptions are examples. Seat maps show table layouts, not architectural floor plans. Seats are not reserved. Historical MongoDB snapshots become stale unless the writer refreshes them.
+1. Add a camera name, floor, zone, source (RTSP URL, HTTP URL, or local video path), and interval.
+2. Use **Test now** to make a detection preview.
+3. Create and review a seat-polygon calibration for that exact camera resolution.
+4. Mark the calibration reviewed only after confirming its LibEdge seat IDs.
+5. The manager then writes one current snapshot per calibrated floor-zone into the configured MongoDB collection.
+
+Dynamic chair/person detection is preview-only. It intentionally does not publish an unreviewed seating layout to the student app. See [the camera manager guide](backend/camera_manager/README.md) for details.
+
+## Maps and seating directions
+
+Every recommendation contains a selectable table map. Choosing a different suitable zone updates the tile map, availability statistics, and **Locate seats** destination. The directions panel uses built-in floor-plan illustrations for Floors 1–3, consistent lift/stair access, landmarks, and a blue route from the lift to the selected table.
+
+The routes and landmarks are designed for the current demonstration; seats are not reserved by selecting or locating them.
+
+## Deployment notes
+
+- Use HTTPS and proper staff authentication before exposing the staff dashboard or camera manager outside a trusted network.
+- Keep MongoDB credentials in environment variables or a secrets manager only.
+- For a real camera installation, calibrate each zone separately and monitor stale timestamps / camera-offline states.
+- The `edge/` folder remains available for a future NVIDIA Jetson deployment that posts authenticated updates over the LAN.
