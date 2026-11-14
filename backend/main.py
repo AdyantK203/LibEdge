@@ -1,5 +1,6 @@
 """Library seating API: anonymous occupancy, recommendations, and dashboard updates."""
-import asyncio, math, os, time, logging
+import asyncio, math, os, time, logging, sys
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +16,9 @@ NOISE = {k: float(v["noise"]) for k, v in ZONES.items()}
 NODE_LAST_SEEN = {}
 NODE_MODE = {floor: "edge" for floor in {seat.floor for seat in BY_ID.values()}}
 log = logging.getLogger("libedge")
+PROJECT_DIR = str(Path(__file__).resolve().parent.parent)
+if PROJECT_DIR not in sys.path:
+    sys.path.insert(0, PROJECT_DIR)
 
 def answer(n: int, prefer_quiet: bool = False) -> dict:
     return engine.compact(engine.recommend(STATE, NOISE, n, prefer_quiet), STATE)
@@ -47,12 +51,29 @@ async def lifespan(app):
         tasks.append(asyncio.create_task(mongo_sync.run(
             collection, STATE, NOISE, NODE_LAST_SEEN, NODE_MODE, interval
         )))
-    yield
-    for t in tasks: t.cancel()
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
-    if mongo_client:
-        await asyncio.to_thread(mongo_client.close)
+    camera_lifespan = None
+    if os.getenv("CAMERA_MANAGER_ENABLED", "1") == "1":
+        try:
+            from importlib import import_module
+            camera_module = await asyncio.to_thread(import_module, "camera_manager.app")
+            camera_lifespan = camera_module.app.router.lifespan_context(camera_module.app)
+            await camera_lifespan.__aenter__()
+            if not any(getattr(route, "path", None) == "/camera-manager" for route in app.routes):
+                app.mount("/camera-manager", camera_module.app)
+            log.info("Camera manager available at /camera-manager/")
+        except Exception:
+            camera_lifespan = None
+            log.exception("Camera manager unavailable; the seating backend will continue")
+    try:
+        yield
+    finally:
+        if camera_lifespan:
+            await camera_lifespan.__aexit__(None, None, None)
+        for t in tasks: t.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        if mongo_client:
+            await asyncio.to_thread(mongo_client.close)
 
 app = FastAPI(title="LibEdge", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])

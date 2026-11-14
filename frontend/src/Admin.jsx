@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import ThemeToggle from "./ThemeToggle";
+import ViewToggle from "./ViewToggle";
 import { ZONE_LOCATIONS } from "./zoneLocations";
 
 const SEAT_STATUS = {
@@ -9,12 +10,13 @@ const SEAT_STATUS = {
   unknown: "Unknown",
 };
 
-function Header({ theme, onThemeChange, live }) {
+function Header({ theme, onThemeChange, view, onViewChange, live }) {
   return (
     <header>
       <span className="mark">Lib<b>Edge</b> <small>Library staff</small></span>
       <div className="header-actions">
         <a className="nav-link" href="#">Student view</a>
+        <ViewToggle view={view} onChange={onViewChange} />
         <ThemeToggle theme={theme} onChange={onThemeChange} />
         <span className={`pill ${live ? "on" : ""}`}><i />{live ? "Connected" : "Reconnecting"}</span>
       </div>
@@ -82,7 +84,7 @@ function CameraDialog({ dialogRef, onClose }) {
   );
 }
 
-export default function Admin({ theme, onThemeChange }) {
+export default function Admin({ theme, onThemeChange, view, onViewChange }) {
   const [s, setS] = useState(null);
   const [live, setLive] = useState(false);
   const [selectedFloor, setSelectedFloor] = useState(1);
@@ -118,16 +120,18 @@ export default function Admin({ theme, onThemeChange }) {
         : `Floor data last reported ${activeNode.age_seconds}s ago`;
 
   if (!s) return <main className="admin">
-    <Header theme={theme} onThemeChange={onThemeChange} live={live} />
+    <Header theme={theme} onThemeChange={onThemeChange} view={view} onViewChange={onViewChange} live={live} />
     <h1 className="dashboard-title">Library overview</h1>
     <p className="dashboard-intro" role="status">Waiting for the library server. This page reconnects automatically.</p>
+    <a className="secondary-button camera-manager-link" href="#cameras">Manage cameras <span aria-hidden="true">→</span></a>
   </main>;
 
   return (
     <main className="admin">
-      <Header theme={theme} onThemeChange={onThemeChange} live={live} />
-      <h1 className="dashboard-title">Library overview</h1>
-      <p className="dashboard-intro">Check occupancy, compare floors, and inspect seat availability by zone.</p>
+      <Header theme={theme} onThemeChange={onThemeChange} view={view} onViewChange={onViewChange} live={live} />
+      <div className="admin-heading"><div><h1 className="dashboard-title">Library overview</h1>
+      <p className="dashboard-intro">Check occupancy, compare floors, and inspect seat availability by zone.</p></div>
+      <a className="secondary-button camera-manager-link" href="#cameras">Manage cameras <span aria-hidden="true">→</span></a></div>
 
       <section className="kpis" aria-label="Library summary">
         <div><small>Total occupancy</small><strong>{s.occupancy}%</strong></div>

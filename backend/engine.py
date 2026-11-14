@@ -56,13 +56,16 @@ def recommend(state, noise, n, prefer_quiet=False):
     if not ok:
         return dict(ok=False, group=n, prefer_quiet=prefer_quiet, floors=floors, options=options,
                     best=max(z["max_group"] for z in zs))
+    def make_choice(z):
+        block = min((g for g in z["groups"] if len(g) >= n), key=len)
+        return dict(ok=True, group=n, floor=z["floor"], zone=z["zone"], label=z["label"],
+                    seats=[s.id for s in block[:n]], max_group=z["max_group"], occ=z["occ"],
+                    noise=z["noise"], noise_level=level(z["noise"]), walk=z["walk"],
+                    prefer_quiet=prefer_quiet, floors=floors, options=options)
     best = max(ok, key=lambda z: score(z, n, prefer_quiet))
-    block = min((g for g in best["groups"] if len(g) >= n), key=len)
-    return dict(ok=True, group=n, floor=best["floor"], zone=best["zone"], label=best["label"],
-                seats=[s.id for s in block[:n]], max_group=best["max_group"], occ=best["occ"],
-                noise=best["noise"], noise_level=level(best["noise"]), walk=best["walk"],
-                prefer_quiet=prefer_quiet,
-                floors=floors, options=options)
+    result = make_choice(best)
+    result["choices"] = [make_choice(z) for z in ranked if z["max_group"] >= n]
+    return result
 
 def compact(rec, state):
     """Student response. Map: e=empty, o=taken, b=bag, u=unknown, *=suggested."""
@@ -76,9 +79,12 @@ def compact(rec, state):
     ch = {"empty": "e", "occupied": "o", "object": "b", "unknown": "u"}
     rows = "|".join("".join("*" if idx[(t, r, c)].id in pick else ch.get(state.get(idx[(t, r, c)].id), "u")
                     for r in range(2) for c in range(4)) for t in sorted({s.table for s in seats}))
-    return {"ok": 1, "g": rec["group"], "f": rec["floor"], "z": rec["label"], "n": rec["max_group"],
+    result = {"ok": 1, "g": rec["group"], "f": rec["floor"], "z": rec["label"], "zone_id": rec["zone"], "seat_ids": rec["seats"], "n": rec["max_group"],
             "q": rec["noise_level"], "t": rec["walk"], "o": rec["occ"], "map": rows,
             "oz": opts, "p": int(rec["prefer_quiet"])}
+    if "choices" in rec:
+        result["choices"] = [compact(choice, state) for choice in rec["choices"]]
+    return result
 
 def summary(state, noise):
     zs = zone_stats(state, noise)

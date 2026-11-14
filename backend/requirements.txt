@@ -2,3 +2,4 @@ fastapi==0.115.*
 uvicorn[standard]==0.30.*
 pydantic==2.*
 pymongo>=4.9,<5
+-r camera_manager/requirements.txt
