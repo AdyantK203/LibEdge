@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from layout import BY_ID, ZONES
 
 log = logging.getLogger("libedge.mongo")
-VALID_STATES = {"empty", "occupied", "object"}
+VALID_STATES = {"empty", "occupied", "object", "unknown"}
 FLOORS = sorted({seat.floor for seat in BY_ID.values()})
 
 

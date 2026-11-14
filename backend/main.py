@@ -87,6 +87,12 @@ def edge_update(u: EdgeUpdate, x_node_key: str = Header("")):
 
 def current_state():
     result = engine.summary(STATE, NOISE)
+    result["data_source"] = {
+        "mode": "mongodb" if os.getenv("MONGODB_URI") else "simulator_or_edge",
+        "database": os.getenv("MONGODB_DATABASE", "libedge"),
+        "collection": os.getenv("MONGODB_COLLECTION", "floor_state"),
+        "poll_seconds": float(os.getenv("MONGODB_POLL_SECONDS", "2")),
+    }
     now = time.time()
     result["nodes"] = [
         {"floor": floor, "mode": NODE_MODE[floor], "last_seen": NODE_LAST_SEEN.get(floor),

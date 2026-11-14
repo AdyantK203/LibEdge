@@ -29,7 +29,7 @@ def zone_stats(state, noise):
         g = free_groups(seats, state)
         empty = sum(len(x) for x in g)
         out.append(dict(floor=f, zone=z, label=label(z), total=len(seats), empty=empty,
-                        occ=round(100 * (1 - empty / len(seats))), groups=g,
+                        occ=round(100 * sum(state.get(s.id) == "occupied" for s in seats) / len(seats)), groups=g,
                         max_group=max((len(x) for x in g), default=0),
                         noise=noise[(f, z)], walk=ZONES[(f, z)]["walk"]))
     return out
@@ -82,7 +82,7 @@ def compact(rec, state):
 
 def summary(state, noise):
     zs = zone_stats(state, noise)
-    taken = sum(v != "empty" for v in state.values())
+    taken = sum(v == "occupied" for v in state.values())
     quiet, big = min(zs, key=lambda z: z["noise"]), max(zs, key=lambda z: z["max_group"])
     floors = []
     for f in sorted({z["floor"] for z in zs}):
@@ -96,9 +96,10 @@ def summary(state, noise):
             ]
             zones.append({**{k: z[k] for k in ("label", "empty", "occ", "max_group", "noise")},
                           "seats": seat_details})
-        floors.append(dict(floor=f, occ=round(100 * (1 - sum(z["empty"] for z in fz) / sum(z["total"] for z in fz))),
+        occupied = sum(state.get(seat.id) == "occupied" for z in fz for seat in BY_ZONE[(f, z["zone"])])
+        floors.append(dict(floor=f, occ=round(100 * occupied / sum(z["total"] for z in fz)),
                            empty=sum(z["empty"] for z in fz),
                            zones=zones))
-    return dict(total=len(state), occupancy=round(100 * taken / len(state)), available=len(state) - taken,
+    return dict(total=len(state), occupancy=round(100 * taken / len(state)), available=sum(v == "empty" for v in state.values()),
                 quietest=f'{quiet["floor"]}F-{quiet["label"]}', largest=f'{big["floor"]}F-{big["label"]}',
                 largest_size=big["max_group"], floors=floors)

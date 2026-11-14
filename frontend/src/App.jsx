@@ -3,6 +3,7 @@ import { getRecommendation } from "./api";
 import Admin from "./Admin";
 import { ZONE_LOCATIONS } from "./zoneLocations";
 import ThemeToggle from "./ThemeToggle";
+import ViewToggle from "./ViewToggle";
 
 const CELL = { e: "seat", o: "seat taken", b: "seat bag", "*": "seat pick", u: "seat unknown" };
 
@@ -44,33 +45,63 @@ function ZoneOptions({ options = [], need, bestFloor, bestZone, preferQuiet }) {
   );
 }
 
-function Student({ theme, onThemeChange }) {
+function SpeakerIcon({ muted = false }) {
+  return <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M3 10v4h4l5 4V6l-5 4H3Z" />
+    {muted
+      ? <><path d="m16 9 5 6" /><path d="m21 9-5 6" /></>
+      : <><path d="M16 9.5a4 4 0 0 1 0 5" /><path d="M19 7a7.5 7.5 0 0 1 0 10" /></>}
+  </svg>;
+}
+
+function QuietPreferenceCopy({ filled = false }) {
+  return (
+    <span className={`preference-copy${filled ? " preference-copy-filled" : ""}`} aria-hidden={filled || undefined}>
+      {filled ? <span className="quiet-icon-placeholder" /> : <span className="quiet-icon"><SpeakerIcon /></span>}
+      <span><b>Prefer a quieter place</b><small>Prioritise lower-noise zones when suitable seats are available.</small></span>
+    </span>
+  );
+}
+
+function LoadingLabel({ children }) {
+  return <><span className="button-spinner" aria-hidden="true" />{children}</>;
+}
+
+function Student({ theme, onThemeChange, view, onViewChange }) {
   const request = useRef(null);
   const [phase, setPhase] = useState("ready");
   const [n, setN] = useState(4);
   const [preferQuiet, setPreferQuiet] = useState(false);
   const [res, setRes] = useState(null);
   const [err, setErr] = useState("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
   useEffect(() => () => request.current?.abort(), []);
 
-  async function find() {
+  async function find(refresh = false) {
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
     const timeout = setTimeout(() => controller.abort(), 10000);
+    const startedAt = performance.now();
     setErr("");
-    setPhase("asking");
+    if (refresh) setIsRefreshing(true);
+    else setPhase("asking");
     try {
       const result = await getRecommendation(n, preferQuiet, controller.signal);
+      const remaining = 500 - (performance.now() - startedAt);
+      if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
       setRes(result);
       setPhase("done");
     } catch (error) {
+      const remaining = 500 - (performance.now() - startedAt);
+      if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
       setErr(error.name === "AbortError"
         ? "The search timed out. Check your connection and try again."
         : "Cannot reach the library server. Please try again in a moment.");
-      setPhase("ready");
+      if (!refresh) setPhase("ready");
     } finally {
       clearTimeout(timeout);
+      setIsRefreshing(false);
     }
   }
 
@@ -79,6 +110,7 @@ function Student({ theme, onThemeChange }) {
       <header>
         <span className="mark">Lib<b>Edge</b></span>
         <div className="header-actions">
+          <ViewToggle view={view} onChange={onViewChange} />
           <ThemeToggle theme={theme} onChange={onThemeChange} />
           <a className="nav-link" href="#admin">Staff view</a>
         </div>
@@ -95,12 +127,19 @@ function Student({ theme, onThemeChange }) {
             <output aria-live="polite">{n}<small>{n === 1 ? "person" : "people"}</small></output>
             <button onClick={() => setN(Math.min(12, n + 1))} disabled={n === 12 || phase === "asking"} aria-label="More people">+</button>
           </div>
-          <label className="preference">
-            <input type="checkbox" disabled={phase === "asking"} checked={preferQuiet} onChange={(event) => setPreferQuiet(event.target.checked)} />
-            <span><b>Prefer a quieter place</b><small>Give quieter zones more priority.</small></span>
+          <label className={`preference${preferQuiet ? " active" : ""}`}>
+            <input
+              type="checkbox"
+              disabled={phase === "asking"}
+              checked={preferQuiet}
+              onChange={(event) => setPreferQuiet(event.target.checked)}
+            />
+            <QuietPreferenceCopy />
+            <QuietPreferenceCopy filled />
+            <span className="quiet-icon-active" aria-hidden="true"><SpeakerIcon muted /></span>
           </label>
-          <button className="primary" onClick={find} disabled={phase === "asking"}>
-            {phase === "asking" ? "Checking every floor…" : "Find seats"}
+          <button className="primary" onClick={() => find()} disabled={phase === "asking"}>
+            {phase === "asking" ? <LoadingLabel>Checking every floor…</LoadingLabel> : "Find seats"}
           </button>
         </section>
       )}
@@ -108,13 +147,15 @@ function Student({ theme, onThemeChange }) {
       {phase === "done" && res && (
         <section className="result">
           {res.ok ? (<>
-            <p className="eyebrow">{res.p ? `Quieter match for ${res.g}` : `Best match for ${res.g}`}</p>
-            <h2>Floor {res.f}<span> · {res.z}</span><small className="place-note">Example location: {ZONE_LOCATIONS[`${res.f}:${res.z}`]}</small></h2>
-            <div className="chips">
-              <span><b>{res.n}</b> adjacent seats</span>
-              <span><b>{res.q}</b> noise</span>
-              <span><b>~{res.t}s</b> walk</span>
-              <span><b>{res.o}%</b> full</span>
+            <div className="result-summary">
+              <p className="eyebrow">{res.p ? `Quieter match for ${res.g}` : `Best match for ${res.g}`}</p>
+              <h2>Floor {res.f}<span> · {res.z}</span><small className="place-note">Example location: {ZONE_LOCATIONS[`${res.f}:${res.z}`]}</small></h2>
+              <div className="chips">
+                <span><b>{res.n}</b> adjacent seats</span>
+                <span><b>{res.q}</b> noise</span>
+                <span><b>~{res.t}s</b> walk</span>
+                <span><b>{res.o}%</b> full</span>
+              </div>
             </div>
             <SeatMap map={res.map} />
             <p className="legend"><i className="seat pick" /> suggested <i className="seat" /> available <i className="seat taken" /> occupied <i className="seat bag" /> item <i className="seat unknown" /> unknown</p>
@@ -126,7 +167,9 @@ function Student({ theme, onThemeChange }) {
             <ZoneOptions options={res.oz} need={res.g} preferQuiet={res.p === 1} />
           </>)}
           <button className="ghost" onClick={() => setPhase("ready")}>Change search</button>
-          <button className="ghost" onClick={find}>Refresh availability</button>
+          <button className="ghost" onClick={() => find(true)} disabled={isRefreshing}>
+            {isRefreshing ? <LoadingLabel>Refreshing availability…</LoadingLabel> : "Refresh availability"}
+          </button>
         </section>
       )}
       {err && <p className="err" role="alert">{err}</p>}
@@ -140,6 +183,10 @@ export default function App() {
     try { return localStorage.getItem("libedge-theme") === "dark" ? "dark" : "light"; }
     catch { return "light"; }
   });
+  const [view, setView] = useState(() => {
+    try { return localStorage.getItem("libedge-view") === "phone" ? "phone" : "desktop"; }
+    catch { return "desktop"; }
+  });
   useEffect(() => {
     const f = () => setAdmin(location.hash === "#admin");
     addEventListener("hashchange", f); return () => removeEventListener("hashchange", f);
@@ -148,7 +195,11 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     try { localStorage.setItem("libedge-theme", theme); } catch { /* Theme still applies for this session. */ }
   }, [theme]);
+  useEffect(() => {
+    document.documentElement.dataset.view = view;
+    try { localStorage.setItem("libedge-view", view); } catch { /* View still applies for this session. */ }
+  }, [view]);
   return admin
     ? <Admin theme={theme} onThemeChange={setTheme} />
-    : <Student theme={theme} onThemeChange={setTheme} />;
+    : <div className="student-shell"><div className="phone-frame"><Student theme={theme} onThemeChange={setTheme} view={view} onViewChange={setView} /></div></div>;
 }
